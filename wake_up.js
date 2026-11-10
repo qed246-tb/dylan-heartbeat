@@ -586,7 +586,12 @@ ${historyText}`
         console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
         eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
       } else {
-        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+      eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+        // 新加的把推送内容存到记忆里的代码：
+        fetch("https://maiwicvvnitriuzwxhsq.supabase.co/functions/v1/kiro-memory?action=write&id=bark_" + Date.now() + "&content=" + encodeURIComponent("刚刚给沈云发了Bark推送：" + safeTitle + "：" + safeBody), {
+          headers: { "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1haXdpY3Z2bml0cml1end4aHNxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4Njk3Njg5OSwiZXhwIjoyMTAyNTUyODk5fQ.5vYx1rRBfGAintaJRZf9l1nely0va3P4gGazx8OHO5g" }
+        }).catch(err => console.error("存记忆失败:", err));
+    }
       }
     }
   }
