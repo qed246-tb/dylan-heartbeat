@@ -6,34 +6,19 @@ const SUPABASE_TOKEN = process.env.SUPABASE_TOKEN || "";
 
 app.get("/admin/memory", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    if (!SUPABASE_TOKEN) {
-      return reply.code(500).send({ error: "SUPABASE_TOKEN 未配置" });
-    }
-
-    const target = new URL(SUPABASE_MEMORY_URL);
     const { action, id, content } = req.query;
-
-    if (action != null) target.searchParams.set("action", String(action));
-    if (id != null) target.searchParams.set("id", String(id));
-    if (content != null) target.searchParams.set("content", String(content));
-
-    const res = await fetch(target, {
-      headers: { Authorization: `Bearer ${SUPABASE_TOKEN}` },
+    let url = SUPABASE_MEMORY_URL;
+    if (action) {
+      url += "?action=" + encodeURIComponent(action);
+      if (id) url += "&id=" + encodeURIComponent(id);
+      if (content) url += "&content=" + encodeURIComponent(content);
+    }
+    const res = await fetch(url, {
+      headers: { "Authorization": "Bearer " + SUPABASE_TOKEN }
     });
-
-    const responseText = await res.text();
-    const contentType = res.headers.get("content-type");
-
-    if (contentType) {
-      reply.type(contentType);
-    }
-
-    reply.code(res.status);
-    return reply.send(responseText);
+    const data = await res.text();
+    reply.type("application/json").send(data);
   } catch (err) {
-    if (req.log) {
-      req.log.error({ err }, "Supabase memory proxy failed");
-    }
-    return reply.code(502).send({ error: "记忆服务暂时不可用" });
+    reply.code(500).send({ error: err.message });
   }
 });
