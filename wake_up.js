@@ -155,6 +155,31 @@ async function sendPushNotification({ title, body }) {
   return { ok: true, providerLabel: "Bark" };
 }
 
+async function persistWakeMemory({ provider, title, body }) {
+  const memoryUrl = process.env.WAKE_MEMORY_URL;
+  if (!memoryUrl) return;
+
+  const token = process.env.WAKE_MEMORY_TOKEN;
+  const content = `刚刚给用户发了${provider}推送：${title}｜${body}`;
+
+  try {
+    await fetch(memoryUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        action: "write",
+        id: `${provider}_${Date.now()}`,
+        content
+      })
+    });
+  } catch (err) {
+    console.error("存记忆失败:", err);
+  }
+}
+
 function isDayTime(date = new Date()) {
   const hour = getHourInTimeZone(date, TIME_ZONE);
   const start = readNumberEnv("WAKE_DAY_START_HOUR", 10, { min: 0, max: 23 });
@@ -242,6 +267,13 @@ function weatherCodeText(code) {
   return table[code] || `天气代码 ${code}`;
 }
 
+function formatWeatherValue(value, unit = "") {
+  if (value === null || value === undefined || value === "") return "未知";
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return `${numeric}${unit}`;
+  return String(value);
+}
+
 async function fetchWeatherContext() {
   if (!readBooleanEnv("WEATHER_ENABLED", false)) return "";
 
@@ -278,10 +310,10 @@ async function fetchWeatherContext() {
     const lines = [
       "## 天气信息",
       `- 位置：${location}`,
-      `- 当前：${weatherCodeText(current.weather_code)}，${current.temperature_2m}${unitsInfo.temperature_2m || "°C"}，体感 ${current.apparent_temperature}${unitsInfo.apparent_temperature || "°C"}`,
-      `- 湿度：${current.relative_humidity_2m}${unitsInfo.relative_humidity_2m || "%"}`,
-      `- 降雨：${current.precipitation}${unitsInfo.precipitation || "mm"}`,
-      `- 风速：${current.wind_speed_10m}${unitsInfo.wind_speed_10m || ""}`
+      `- 当前：${weatherCodeText(current.weather_code)}，${formatWeatherValue(current.temperature_2m, unitsInfo.temperature_2m || "°C")}，体感 ${formatWeatherValue(current.apparent_temperature, unitsInfo.apparent_temperature || "°C")}`,
+      `- 湿度：${formatWeatherValue(current.relative_humidity_2m, unitsInfo.relative_humidity_2m || "%")}`,
+      `- 降雨：${formatWeatherValue(current.precipitation, unitsInfo.precipitation || "mm")}`,
+      `- 风速：${formatWeatherValue(current.wind_speed_10m, unitsInfo.wind_speed_10m || "")}`
     ];
     if (Array.isArray(daily.sunrise) && Array.isArray(daily.sunset)) {
       lines.push(`- 日出/日落：${daily.sunrise[0]} / ${daily.sunset[0]}`);
@@ -393,7 +425,7 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
-- 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
+- 如果想联系用户，直接写你想说的话。系统会自动��包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
@@ -444,7 +476,7 @@ async function runWakeUp() {
     .join("\n\n");
 
   const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-  const cleanSP = baseSystemPrompt 
+  const cleanSP = baseSystemPrompt
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
 
@@ -524,10 +556,8 @@ ${historyText}`
     eventContent = diarySaved
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-  // 判断 AI 是否明确要静默
   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    // AI 选择不发送推送
     console.log("\nAI 选择不发送推送\n");
     let reason = (noActionMatch[1] || "").trim();
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
@@ -537,11 +567,9 @@ ${historyText}`
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
-    // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
     let barkText = aiText;
 
-    // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
     const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
     if (barkMatch) {
       barkText = barkMatch[1].trim();
@@ -550,12 +578,10 @@ ${historyText}`
       barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
     }
 
-    // 清洗“标题：”、“正文：”前缀（如果有）
     barkText = barkText
       .replace(/^标题[：:]\s*/gm, "")
       .replace(/^正文[：:]\s*/gm, "");
 
-    // 按行处理
     const lines = barkText.split("\n").filter(line => line.trim() !== "");
 
     let title, body;
@@ -569,15 +595,12 @@ ${historyText}`
       title = lines[0].trim();
       body = lines[1].trim();
     } else {
-      // ≥3 行：第一行标题，剩余用空格拼接成正文
       title = lines[0].trim();
       body = lines.slice(1).map(l => l.trim()).join(" ");
     }
 
     if (!eventContent) {
-      // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
       const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
-      // 若标题为空或以数字开头，加个前缀，可自行修改
       let safeTitle = title || "来自伴侣";
       if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
 
@@ -586,12 +609,12 @@ ${historyText}`
         console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
         eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
       } else {
-      eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
-        // 新加的把推送内容存到记忆里的代码：
-        fetch("https://maiwicvvnitriuzwxhsq.supabase.co/functions/v1/kiro-memory?action=write&id=bark_" + Date.now() + "&content=" + encodeURIComponent("刚刚给沈云发了Bark推送：" + safeTitle + "：" + safeBody), {
-          headers: { "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1haXdpY3Z2bml0cml1end4aHNxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4Njk3Njg5OSwiZXhwIjoyMTAyNTUyODk5fQ.5vYx1rRBfGAintaJRZf9l1nely0va3P4gGazx8OHO5g" }
-        }).catch(err => console.error("存记忆失败:", err));
-    }
+        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+        await persistWakeMemory({
+          provider: pushResult.providerLabel,
+          title: safeTitle,
+          body: safeBody
+        });
       }
     }
   }
