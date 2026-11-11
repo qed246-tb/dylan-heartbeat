@@ -155,28 +155,26 @@ async function sendPushNotification({ title, body }) {
   return { ok: true, providerLabel: "Bark" };
 }
 
+// 推送发送成功后，将内容写入 Supabase 记忆库
 async function persistWakeMemory({ provider, title, body }) {
-  const memoryUrl = process.env.WAKE_MEMORY_URL;
-  if (!memoryUrl) return;
-
-  const token = process.env.WAKE_MEMORY_TOKEN;
-  const content = `刚刚给用户发了${provider}推送：${title}｜${body}`;
-
+  const SUPABASE_TOKEN = process.env.SUPABASE_TOKEN;
+  if (!SUPABASE_TOKEN) {
+    console.log("SUPABASE_TOKEN 未配置，跳过存记忆");
+    return;
+  }
+  const content = encodeURIComponent("刚刚给沈云发了" + provider + "推送：" + title + "：" + body);
+  const url = "https://maiwicvvnitriuzwxhsq.supabase.co/functions/v1/kiro-memory?action=write&id=bark_" + Date.now() + "&content=" + content;
   try {
-    await fetch(memoryUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
-      body: JSON.stringify({
-        action: "write",
-        id: `${provider}_${Date.now()}`,
-        content
-      })
+    const res = await fetch(url, {
+      headers: { "Authorization": "Bearer " + SUPABASE_TOKEN }
     });
+    if (res.ok) {
+      console.log("推送内容已写入记忆库");
+    } else {
+      console.error("写入记忆库失败:", res.status);
+    }
   } catch (err) {
-    console.error("存记忆失败:", err);
+    console.error("存记忆失败:", err.message);
   }
 }
 
@@ -425,7 +423,7 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
-- 如果想联系用户，直接写你想说的话。系统会自动��包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
+- 如果想联系用户，直接写你想说的话。系统会自动包装成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
@@ -589,7 +587,7 @@ ${historyText}`
       console.log("\n推送内容清洗后为空，本次不发送推送\n");
       eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
     } else if (lines.length === 1) {
-      title = "来自AI";
+      title = "Kiro";
       body = lines[0].trim();
     } else if (lines.length === 2) {
       title = lines[0].trim();
@@ -601,8 +599,8 @@ ${historyText}`
 
     if (!eventContent) {
       const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
-      let safeTitle = title || "来自伴侣";
-      if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
+      let safeTitle = title || "Kiro";
+      if (/^\d/.test(safeTitle)) safeTitle = "Kiro｜" + safeTitle;
 
       const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
       if (!pushResult.ok) {
