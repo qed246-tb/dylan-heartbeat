@@ -546,10 +546,42 @@ app.get("/healthz", async () => ({ status: "ok" }));
 // Models
 // ========================
 app.get("/v1/models", async (req, reply) => {
-  reply.send({
-    object: "list",
-    data: [{ id: configuredModelName(), object: "model", created: 0, owned_by: "gateway" }]
-  });
+  try {
+    if (!TARGET_API_URL || !process.env.TARGET_API_KEY) {
+      return reply.send({
+        object: "list",
+        data: [{ id: configuredModelName(), object: "model", created: 0, owned_by: "gateway" }]
+      });
+    }
+
+    let baseUrl = TARGET_API_URL;
+    if (baseUrl.endsWith('/chat/completions')) {
+      baseUrl = baseUrl.replace('/chat/completions', '/models');
+    } else if (!baseUrl.endsWith('/models')) {
+      const urlObj = new URL(baseUrl);
+      baseUrl = `${urlObj.origin}/v1/models`;
+    }
+
+    const response = await fetch(baseUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${process.env.TARGET_API_KEY}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upstream returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    reply.send(data);
+  } catch (err) {
+    req.log.error({ err }, "获取模型列表失败");
+    reply.send({
+      object: "list",
+      data: [{ id: configuredModelName(), object: "model", created: 0, owned_by: "gateway" }]
+    });
+  }
 });
 
 // ========================
